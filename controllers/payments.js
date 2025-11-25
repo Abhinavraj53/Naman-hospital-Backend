@@ -77,10 +77,12 @@ exports.createCashfreeOrder = async (req, res) => {
 
     const orderResponse = await cashfree.createOrder(cashfreePayload);
 
+    const hostedPaymentLink = buildHostedCheckoutLink(orderResponse, orderId);
+
     await PaymentIntent.create({
       orderId,
       paymentSessionId: orderResponse.payment_session_id,
-      paymentLink: orderResponse.payment_link,
+      paymentLink: hostedPaymentLink,
       amount,
       currency: 'INR',
       patientId: req.user.id,
@@ -93,7 +95,7 @@ exports.createCashfreeOrder = async (req, res) => {
     return res.status(201).json({
       orderId,
       paymentSessionId: orderResponse.payment_session_id,
-      paymentLink: orderResponse.payment_link,
+      paymentLink: hostedPaymentLink,
       amount,
       currency: 'INR',
       doctor: {
@@ -268,6 +270,24 @@ function ensureHttpsUrl(raw, label = 'URL') {
   const prefixed = `https://${trimmed}`;
   console.warn(`[Cashfree] ${label} missing protocol. Using ${prefixed}`);
   return prefixed;
+}
+
+function buildHostedCheckoutLink(orderResponse, fallbackOrderId) {
+  const orderId = orderResponse?.order_id || fallbackOrderId;
+  const paymentSessionId = orderResponse?.payment_session_id;
+  if (!orderId) {
+    return '';
+  }
+
+  const envKey = (process.env.CASHFREE_ENV || 'test').toLowerCase();
+  const isProd = ['prod', 'production', 'live'].includes(envKey);
+  const baseUrl = isProd ? 'https://payments.cashfree.com/order' : 'https://payments.cashfree.com/order';
+
+  if (paymentSessionId) {
+    return `${baseUrl}/#/?payment_session_id=${encodeURIComponent(paymentSessionId)}`;
+  }
+
+  return `${baseUrl}/#/?order_id=${encodeURIComponent(orderId)}`;
 }
 
 
