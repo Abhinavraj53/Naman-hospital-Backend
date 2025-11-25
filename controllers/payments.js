@@ -9,6 +9,7 @@ const DEFAULT_FEE = Number(process.env.DEFAULT_CONSULTATION_FEE || 500);
 const SERVER_PUBLIC_URL = (process.env.BACKEND_PUBLIC_URL || process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 5001}`).replace(/\/$/, '');
 const CLIENT_BASE_URL = resolvePaymentReturnBase();
 const PAYMENT_WEBHOOK_URL = resolveWebhookUrl();
+const PENDING_GRACE_MS = Number(process.env.PAYMENT_PENDING_GRACE_MINUTES || 10) * 60 * 1000; // default 10 minutes
 
 const normalizeDate = (value) => {
   const date = new Date(value);
@@ -48,9 +49,20 @@ exports.createCashfreeOrder = async (req, res) => {
     });
 
     if (pendingIntent) {
-      return res
-        .status(409)
-        .json({ message: 'Another payment is already in progress for this slot. Please wait or pick a new slot.' });
+      const isStale = Date.now() - new Date(pendingIntent.createdAt).getTime() > PENDING_GRACE_MS;
+      if (!isStale) {
+        return res.status(409).json({
+          message:
+            'Another payment is already in progress for this slot. Please wait a few minutes or pick a different slot.',
+        });
+      }
+
+      pendingIntent.status = 'EXPIRED';
+      pendingIntent.rawWebhookPayload = {
+        expiredAt: new Date().toISOString(),
+        reason: 'Expired automatically after pending grace window',
+      };
+      await pendingIntent.save();
     }
 
     const amount = Number(doctor.consultationFee || DEFAULT_FEE);
