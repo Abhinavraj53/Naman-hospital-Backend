@@ -23,14 +23,22 @@ const rawOrigins =
   process.env.FRONTEND_URLS ||
   process.env.FRONTEND_URL ||
   'http://localhost:3000,http://localhost:5173,https://localhost:5173';
+const normalizeOrigin = origin => origin.replace(/\/$/, '');
+
 const allowedOrigins = rawOrigins
   .split(',')
   .map(origin => origin.trim())
-  .filter(Boolean);
+  .filter(Boolean)
+  .map(normalizeOrigin);
 
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const normalizedOrigin = normalizeOrigin(origin);
+    if (allowedOrigins.includes(normalizedOrigin)) {
       callback(null, true);
     } else {
       callback(new Error(`Not allowed by CORS: ${origin}`));
