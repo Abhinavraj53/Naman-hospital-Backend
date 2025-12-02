@@ -33,7 +33,7 @@ const createAdmin = async () => {
       email: 'admin@namanhospital.com',
       password: 'admin123', // Will be hashed automatically by pre-save hook
       role: 'ADMIN',
-      phone: '+91 6272 245 911',
+      phone: '+91 9234277007',
       isEmailVerified: true,
       isActive: true
     });

@@ -153,6 +153,117 @@ exports.getOrderStatus = async (req, res) => {
   }
 };
 
+// @desc    Create COD (Cash on Delivery) appointment
+// @route   POST /api/payments/cod/order
+// @access  Private/Patient
+exports.createCODOrder = async (req, res) => {
+  try {
+    const { doctorId, date, timeSlot, notes } = req.body;
+
+    if (!doctorId || !date || !timeSlot) {
+      return res.status(400).json({ message: 'Doctor, date and time slot are required' });
+    }
+
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor || !doctor.isActive) {
+      return res.status(404).json({ message: 'Doctor not found or not active' });
+    }
+
+    const normalizedDate = normalizeDate(date);
+    
+    // Check for existing appointment
+    const existingAppointment = await Appointment.findOne({
+      doctorId: doctor._id,
+      date: normalizedDate,
+      timeSlot,
+    });
+
+    if (existingAppointment) {
+      return res.status(409).json({ message: 'This slot has already been booked. Please choose another one.' });
+    }
+
+    // Check for pending payment intents
+    const pendingIntent = await PaymentIntent.findOne({
+      doctorId: doctor._id,
+      date: normalizedDate,
+      timeSlot,
+      status: 'PENDING',
+    });
+
+    if (pendingIntent) {
+      const isStale = Date.now() - new Date(pendingIntent.createdAt).getTime() > PENDING_GRACE_MS;
+      if (!isStale) {
+        return res.status(409).json({
+          message:
+            'Another payment is already in progress for this slot. Please wait a few minutes or pick a different slot.',
+        });
+      }
+      // Mark stale intent as expired
+      pendingIntent.status = 'EXPIRED';
+      pendingIntent.rawWebhookPayload = {
+        expiredAt: new Date().toISOString(),
+        reason: 'Expired automatically after pending grace window',
+      };
+      await pendingIntent.save();
+    }
+
+    const amount = Number(doctor.consultationFee || DEFAULT_FEE);
+
+    // Create appointment directly for COD
+    const appointment = await Appointment.create({
+      doctorId: doctor._id,
+      patientId: req.user.id,
+      date: normalizedDate,
+      timeSlot,
+      notes,
+      status: 'CONFIRMED',
+      amount,
+      paymentStatus: 'UNPAID',
+      paymentProvider: 'COD',
+      paymentMode: 'COD',
+    });
+
+    // Send confirmation email
+    await sendEmail({
+      to: req.user.email,
+      subject: 'Appointment booked successfully (COD)',
+      html: `
+        <p>Hi ${req.user.name || 'Patient'},</p>
+        <p>Your appointment with <strong>${doctor.name}</strong> has been confirmed with Cash on Delivery payment.</p>
+        <p><strong>Date:</strong> ${appointment.date.toDateString()}<br/>
+        <strong>Slot:</strong> ${appointment.timeSlot}<br/>
+        <strong>Tracking ID:</strong> ${appointment.trackingId}<br/>
+        <strong>Amount to pay:</strong> ₹${amount}</p>
+        <p><strong>Please bring ₹${amount} in cash when you arrive for your appointment.</strong></p>
+        <p>Thank you for choosing Naman Hospital.</p>
+      `,
+    });
+
+    return res.status(201).json({
+      success: true,
+      appointment: {
+        id: appointment._id,
+        trackingId: appointment.trackingId,
+        status: appointment.status,
+        date: appointment.date,
+        timeSlot: appointment.timeSlot,
+      },
+      doctor: {
+        id: doctor._id,
+        name: doctor.name,
+        specialty: doctor.specialty,
+      },
+      amount,
+      currency: 'INR',
+      paymentMethod: 'COD',
+      message: 'Appointment confirmed. Please bring cash payment when you arrive.',
+    });
+  } catch (error) {
+    console.error('[COD] Order creation failed:', error.message);
+    return res.status(500).json({ message: error.message || 'Unable to book appointment. Please try again.' });
+  }
+};
+
 exports.cashfreeWebhook = async (req, res) => {
   try {
     const signature = req.headers['x-webhook-signature'];

@@ -25,11 +25,14 @@ const doctorSchema = new mongoose.Schema(
         'Orthopedics',
         'Plastic Surgery',
         'General Physician',
+        'ENT',
+        'Ophthalmology',
+        'Psychiatry',
       ],
     },
     hospital: {
       type: String,
-      default: 'Naman Hospital, Darbhanga',
+      default: 'नमन हॉस्पिटल दरभंगा (Naman Hospital, Darbhanga)',
     },
     photoUrl: {
       type: String,
